@@ -154,10 +154,17 @@ stages:
       - job: verify_app_health
         displayName: 'Verificar Disponibilidad'
         steps:
-          # 1. Instalar la CLI de OpenShift (Usa la URL espejo oficial funcional de tu CD)
+          # 1. Instalar la CLI de OpenShift construyendo la URL de forma segura
           - script: |
               echo "=== Descargando e instalando OpenShift CLI (oc) ==="
-              curl -LO https://openshift.com
+              DOMAIN="://openshift.com"
+              PATH_URL="pub/openshift-v4/clients/ocp/stable"
+              FILE_NAME="openshift-client-linux.tar.gz"
+              
+              # Unimos las piezas para evitar que la plataforma altere el enlace
+              FULL_URL="https://${DOMAIN}/${PATH_URL}/${FILE_NAME}"
+              
+              curl -LO "$FULL_URL"
               tar -xzf openshift-client-linux.tar.gz
               sudo mv oc /usr/local/bin/
             displayName: 'Instalar oc CLI'
@@ -169,7 +176,6 @@ stages:
               oc project testing-account-dev
               
               echo "=== Obteniendo URL de la Aplicación ==="
-              # Guardamos el host puro de la ruta en la variable ROUTE_URL
               APP_ROUTE=$(oc get route jee-msa-web-demo-pipeline -o jsonpath='{.spec.host}')
               echo "La URL detectada es: http://$APP_ROUTE"
               echo "##vso[task.setvariable variable=ROUTE_URL]http://$APP_ROUTE"
@@ -181,7 +187,6 @@ stages:
               sleep 10
               
               echo "Enviando petición de prueba a: $(ROUTE_URL)"
-              # Ejecuta curl silencioso, guarda el código HTTP en la variable STATUS_CODE
               STATUS_CODE=$(curl -s -o /dev/null -w "%{http_code}" $(ROUTE_URL))
               
               echo "Código de respuesta HTTP obtenido del servidor: $STATUS_CODE"
