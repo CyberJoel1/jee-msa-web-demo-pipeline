@@ -154,19 +154,18 @@ stages:
       - job: verify_app_health
         displayName: 'Verificar Disponibilidad'
         steps:
-          # 1. Instalar la CLI de OpenShift construyendo la URL de forma segura
+          # 1. Instalar la CLI de OpenShift corrigiendo la URL estructurada
           - script: |
               echo "=== Descargando e instalando OpenShift CLI (oc) ==="
-              DOMAIN="://openshift.com"
-              PATH_URL="pub/openshift-v4/clients/ocp/stable"
-              FILE_NAME="openshift-client-linux.tar.gz"
+              # Descarga directa usando la URL oficial estable sin riesgo de parseo incorrecto
+              curl -LO "https://openshift.com"
               
-              # Unimos las piezas para evitar que la plataforma altere el enlace
-              FULL_URL="https://${DOMAIN}/${PATH_URL}/${FILE_NAME}"
-              
-              curl -LO "$FULL_URL"
+              # Extracción y movimiento al PATH global del agente de Azure
               tar -xzf openshift-client-linux.tar.gz
               sudo mv oc /usr/local/bin/
+              
+              # Verificación de que quedó bien instalado
+              oc version --client
             displayName: 'Instalar oc CLI'
 
           # 2. Conectarse y extraer la URL de la Route de OpenShift
@@ -187,23 +186,15 @@ stages:
               sleep 10
               
               echo "Enviando petición de prueba a: $(ROUTE_URL)"
-              STATUS_CODE=$(curl -s -o /dev/null -w "%{http_code}" $(ROUTE_URL))
+              STATUS_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$(ROUTE_URL)")
+              echo "Código de respuesta HTTP obtenido: $STATUS_CODE"
               
-              echo "Código de respuesta HTTP obtenido del servidor: $STATUS_CODE"
-              
-              if [ "$STATUS_CODE" -eq 200 ]; then
-                echo "=========================================================="
-                echo "¡Felicidades Estudiantes! La aplicación respondió con 200 OK"
-                echo "=========================================================="
-                exit 0
-              else
-                echo "=========================================================="
-                echo "ERROR: La aplicación devolvió un código $STATUS_CODE."
-                echo "Verificar que el despliegue no esté en CrashLoopBackOff."
-                echo "=========================================================="
+              if [ "$STATUS_CODE" -ne 200 ]; then
+                echo "Error: La aplicación respondió con un código $STATUS_CODE en lugar de 200 OK"
                 exit 1
               fi
-            displayName: 'Validar Código HTTP 200'
+              echo "¡Validación exitosa! La aplicación está en línea."
+            displayName: 'Validar Código HTTP 200 OK'
   # ==========================================
   # STAGE 4: NOTIFICACIONES (NOTIFICATIONS)
   # ==========================================
