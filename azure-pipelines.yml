@@ -146,8 +146,8 @@ stages:
   # ==========================================
   # STAGE 3.5: PRUEBAS DE HUMO (SMOKE TESTS)
   # ==========================================
-  - stage: SmokeTests
-    displayName: 'Validar Aplicación Viva'
+  - stage: Health
+    displayName: 'Status Health'
     dependsOn: CD
     condition: succeeded()
     jobs:
@@ -185,8 +185,11 @@ stages:
               echo "Esperando 10 segundos a que los Pods se estabilicen..."
               sleep 10
               
-              echo "Enviando petición de prueba a: $(ROUTE_URL)"
-              STATUS_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$(ROUTE_URL)")
+              # Se concatena el endpoint real definido en tu PipelineController
+              HEALTH_ENDPOINT="$(ROUTE_URL)/api/status"
+              
+              echo "Enviando petición de prueba a: $HEALTH_ENDPOINT"
+              STATUS_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$HEALTH_ENDPOINT")
               echo "Código de respuesta HTTP obtenido: $STATUS_CODE"
               
               if [ "$STATUS_CODE" -ne 200 ]; then
