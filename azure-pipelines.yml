@@ -102,9 +102,54 @@ stages:
               notifyUsers: 'jefersonvillacis@hotmail.com'
               instructions: 'Aprobación requerida para ejecutar la fase de despliegue continuo en OpenShift Sandbox.'
               onTimeout: 'reject'
-
   # ==========================================
-  # STAGE 3: DESPLIEGUE CONTINUO (CD)
+  # STAGE 3.5: PRUEBAS DE HUMO (SMOKE TESTS)
+  # ==========================================
+  - stage: SmokeTests
+    displayName: 'Validar Aplicación Viva'
+    dependsOn: CD
+    condition: succeeded()
+    jobs:
+      - job: verify_app_health
+        displayName: 'Verificar Disponibilidad'
+        steps:
+          # 1. Instalar la CLI de OpenShift para obtener la URL dinámica
+          - script: |
+              echo "Instalando OpenShift CLI..."
+              curl -LO https://openshift.com && tar -xzf openshift-client-linux.tar.gz && sudo mv oc /usr/local/bin/
+            displayName: 'Instalar oc CLI'
+
+          # 2. Conectarse y extraer la URL de la Route de OpenShift
+          - script: |
+              oc login --token=$(OPENSHIFT_TOKEN) --server=$(OPENSHIFT_SERVER) --insecure-skip-tls-verify=true
+              oc project testing-account-dev
+              
+              # Guardamos la URL en una variable de entorno de Azure DevOps
+              APP_ROUTE=$(oc get route jee-msa-web-demo-pipeline -o jsonpath='{.spec.host}')
+              echo "La URL de la aplicación es: http://$APP_ROUTE"
+              echo "##vso[task.setvariable variable=ROUTE_URL]http://$APP_ROUTE"
+            displayName: 'Obtener URL de OpenShift'
+
+          # 3. Realizar una petición HTTP (Curl) para validar el estado 200 OK
+          - script: |
+              echo "Esperando 10 segundos a que la aplicación responda..."
+              sleep 10
+              
+              echo "Enviando petición a $(ROUTE_URL)..."
+              STATUS_CODE=$(curl -s -o /dev/null -w "%{http_code}" $(ROUTE_URL))
+              
+              echo "Código de respuesta HTTP obtenido: $STATUS_CODE"
+              
+              if [ "$STATUS_CODE" -eq 200 ]; then
+                echo "¡Felicidades Estudiantes! La aplicación está respondiendo correctamente."
+                exit 0
+              else
+                echo "ERROR: La aplicación devolvió un código $STATUS_CODE. Revisar los logs en OpenShift."
+                exit 1
+              fi
+            displayName: 'Validar Código HTTP 200'
+  # ==========================================
+  # STAGE 4: DESPLIEGUE CONTINUO (CD)
   # ==========================================
   - stage: CD
     displayName: 'CD'
@@ -146,7 +191,7 @@ stages:
             displayName: 'Descarga CLI, Login y Despliegue Docker'
 
   # ==========================================
-  # STAGE 4: NOTIFICACIONES (NOTIFICATIONS)
+  # STAGE 5: NOTIFICACIONES (NOTIFICATIONS)
   # ==========================================
   - stage: Notifications
     displayName: 'Notificar'
