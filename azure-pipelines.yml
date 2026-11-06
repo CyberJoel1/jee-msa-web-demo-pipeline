@@ -154,7 +154,7 @@ stages:
       - job: verify_app_health
         displayName: 'Verificar Disponibilidad'
         steps:
-          # 1. Instalar la CLI de OpenShift (Usa la URL oficial espejo que usas en el CD)
+          # 1. Instalar la CLI de OpenShift (Usa la URL espejo oficial funcional de tu CD)
           - script: |
               echo "=== Descargando e instalando OpenShift CLI (oc) ==="
               curl -LO https://openshift.com
@@ -188,7 +188,7 @@ stages:
               
               if [ "$STATUS_CODE" -eq 200 ]; then
                 echo "=========================================================="
-                echo "¡Felicidades! La aplicación respondió con 200 OK"
+                echo "¡Felicidades Estudiantes! La aplicación respondió con 200 OK"
                 echo "=========================================================="
                 exit 0
               else
