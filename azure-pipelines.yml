@@ -154,38 +154,48 @@ stages:
       - job: verify_app_health
         displayName: 'Verificar Disponibilidad'
         steps:
-          # 1. Instalar la CLI de OpenShift para obtener la URL dinámica
+          # 1. Instalar la CLI de OpenShift (Usa la URL oficial espejo que usas en el CD)
           - script: |
-              echo "Instalando OpenShift CLI..."
-              curl -LO https://openshift.com && tar -xzf openshift-client-linux.tar.gz && sudo mv oc /usr/local/bin/
+              echo "=== Descargando e instalando OpenShift CLI (oc) ==="
+              curl -LO https://openshift.com
+              tar -xzf openshift-client-linux.tar.gz
+              sudo mv oc /usr/local/bin/
             displayName: 'Instalar oc CLI'
 
           # 2. Conectarse y extraer la URL de la Route de OpenShift
           - script: |
+              echo "=== Autenticando en el Clúster ==="
               oc login --token=$(OPENSHIFT_TOKEN) --server=$(OPENSHIFT_SERVER) --insecure-skip-tls-verify=true
               oc project testing-account-dev
               
-              # Guardamos la URL en una variable de entorno de Azure DevOps
+              echo "=== Obteniendo URL de la Aplicación ==="
+              # Guardamos el host puro de la ruta en la variable ROUTE_URL
               APP_ROUTE=$(oc get route jee-msa-web-demo-pipeline -o jsonpath='{.spec.host}')
-              echo "La URL de la aplicación es: http://$APP_ROUTE"
+              echo "La URL detectada es: http://$APP_ROUTE"
               echo "##vso[task.setvariable variable=ROUTE_URL]http://$APP_ROUTE"
             displayName: 'Obtener URL de OpenShift'
 
           # 3. Realizar una petición HTTP (Curl) para validar el estado 200 OK
           - script: |
-              echo "Esperando 10 segundos a que la aplicación responda..."
+              echo "Esperando 10 segundos a que los Pods se estabilicen..."
               sleep 10
               
-              echo "Enviando petición a $(ROUTE_URL)..."
+              echo "Enviando petición de prueba a: $(ROUTE_URL)"
+              # Ejecuta curl silencioso, guarda el código HTTP en la variable STATUS_CODE
               STATUS_CODE=$(curl -s -o /dev/null -w "%{http_code}" $(ROUTE_URL))
               
-              echo "Código de respuesta HTTP obtenido: $STATUS_CODE"
+              echo "Código de respuesta HTTP obtenido del servidor: $STATUS_CODE"
               
               if [ "$STATUS_CODE" -eq 200 ]; then
-                echo "¡Felicidades Estudiantes! La aplicación está respondiendo correctamente."
+                echo "=========================================================="
+                echo "¡Felicidades! La aplicación respondió con 200 OK"
+                echo "=========================================================="
                 exit 0
               else
-                echo "ERROR: La aplicación devolvió un código $STATUS_CODE. Revisar los logs en OpenShift."
+                echo "=========================================================="
+                echo "ERROR: La aplicación devolvió un código $STATUS_CODE."
+                echo "Verificar que el despliegue no esté en CrashLoopBackOff."
+                echo "=========================================================="
                 exit 1
               fi
             displayName: 'Validar Código HTTP 200'
