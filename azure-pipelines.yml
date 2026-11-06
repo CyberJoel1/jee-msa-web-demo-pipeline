@@ -146,8 +146,8 @@ stages:
   # ==========================================
   # STAGE 3.5: PRUEBAS DE HUMO (SMOKE TESTS)
   # ==========================================
-  - stage: Health
-    displayName: 'Status Health'
+  - stage: SmokeTests
+    displayName: 'Validar Aplicación Viva'
     dependsOn: CD
     condition: succeeded()
     jobs:
@@ -157,14 +157,9 @@ stages:
           # 1. Instalar la CLI de OpenShift usando la ruta del mirror oficial
           - script: |
               echo "=== Descargando e instalando OpenShift CLI (oc) ==="
-              # Descarga desde el mirror de Red Hat con el subdominio y ruta correctos
-              curl -LO "https://mirror.openshift.com/pub/openshift-v4/x86_64/clients/ocp/stable/openshift-client-linux.tar.gz"
-              
-              # Desempaquetar e instalar en el PATH global
+              curl -LO "https://openshift.com"
               tar -xzf openshift-client-linux.tar.gz
               sudo mv oc /usr/local/bin/
-              
-              # Confirmación de instalación exitosa
               oc version --client
             displayName: 'Instalar oc CLI'
 
@@ -180,15 +175,17 @@ stages:
               echo "##vso[task.setvariable variable=ROUTE_URL]http://$APP_ROUTE"
             displayName: 'Obtener URL de OpenShift'
 
-          # 3. Realizar una petición HTTP (Curl) para validar el estado 200 OK
+          # 3. Esperar al Pod de OpenShift y realizar la petición HTTP
           - script: |
-              echo "Esperando 10 segundos a que los Pods se estabilicen..."
-              sleep 10
+              # Obligamos a usar el Token/Sesión actual de oc
+              echo "=== 1. Esperando de manera inteligente a que el Pod de Java pase a 1/1 ==="
+              # El pipeline se quedará aquí esperando hasta que Spring Boot levante por completo
+              oc rollout status deployment/jee-msa-web-demo-pipeline --timeout=90s
               
-              # Se concatena el endpoint real definido en tu PipelineController
+              echo "=== 2. Enviando petición HTTP al endpoint real ==="
               HEALTH_ENDPOINT="$(ROUTE_URL)/api/status"
-              
               echo "Enviando petición de prueba a: $HEALTH_ENDPOINT"
+              
               STATUS_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$HEALTH_ENDPOINT")
               echo "Código de respuesta HTTP obtenido: $STATUS_CODE"
               
@@ -196,8 +193,9 @@ stages:
                 echo "Error: La aplicación respondió con un código $STATUS_CODE en lugar de 200 OK"
                 exit 1
               fi
-              echo "¡Validación exitosa! La aplicación está en línea."
+              echo "¡Validación exitosa! La aplicación está respondiendo correctamente."
             displayName: 'Validar Código HTTP 200 OK'
+
   # ==========================================
   # STAGE 4: NOTIFICACIONES (NOTIFICATIONS)
   # ==========================================
