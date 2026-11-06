@@ -154,17 +154,17 @@ stages:
       - job: verify_app_health
         displayName: 'Verificar Disponibilidad'
         steps:
-          # 1. Instalar la CLI de OpenShift corrigiendo la URL estructurada
+          # 1. Instalar la CLI de OpenShift usando la ruta del mirror oficial
           - script: |
               echo "=== Descargando e instalando OpenShift CLI (oc) ==="
-              # Descarga directa usando la URL oficial estable sin riesgo de parseo incorrecto
-              curl -LO "https://openshift.com"
+              # Descarga desde el mirror de Red Hat con el subdominio y ruta correctos
+              curl -LO "https://mirror.openshift.com/pub/openshift-v4/x86_64/clients/ocp/stable/openshift-client-linux.tar.gz"
               
-              # Extracción y movimiento al PATH global del agente de Azure
+              # Desempaquetar e instalar en el PATH global
               tar -xzf openshift-client-linux.tar.gz
               sudo mv oc /usr/local/bin/
               
-              # Verificación de que quedó bien instalado
+              # Confirmación de instalación exitosa
               oc version --client
             displayName: 'Instalar oc CLI'
 
