@@ -147,61 +147,83 @@ stages:
   # STAGE 3.5: PRUEBAS DE HUMO (SMOKE TESTS)
   # ==========================================
   - stage: SmokeTests
-    displayName: 'Validar Aplicación Viva'
+    displayName: 'Health Status'
     dependsOn: CD
     condition: succeeded()
     jobs:
       - job: verify_app_health
         displayName: 'Verificar Disponibilidad'
         steps:
-          # 1. Instalar la CLI de OpenShift usando la ruta del mirror oficial
-          - script: |
-              echo "=== Descargando e instalando OpenShift CLI (oc) ==="
-              curl -LO "https://openshift.com"
-              tar -xzf openshift-client-linux.tar.gz
-              sudo mv oc /usr/local/bin/
+          - bash: |
+              set -euo pipefail
+
+              TOOLS_DIR="$(mktemp -d)"
+              export KUBECONFIG="$TOOLS_DIR/kubeconfig"
+              trap 'rm -f "$TOOLS_DIR/oc" "$TOOLS_DIR/openshift-client-linux.tar.gz" "$KUBECONFIG"; rmdir "$TOOLS_DIR"' EXIT
+
+              echo "=== Descargando OpenShift CLI ==="
+              curl --fail --silent --show-error --location \
+                --output "$TOOLS_DIR/openshift-client-linux.tar.gz" \
+                "https://mirror.openshift.com/pub/openshift-v4/clients/ocp/stable/openshift-client-linux.tar.gz"
+              tar -xzf "$TOOLS_DIR/openshift-client-linux.tar.gz" -C "$TOOLS_DIR" oc
+              export PATH="$TOOLS_DIR:$PATH"
               oc version --client
-            displayName: 'Instalar oc CLI'
 
-          # 2. Conectarse y extraer la URL de la Route de OpenShift
-          - script: |
               echo "=== Autenticando en el Clúster ==="
-              oc login --token=$(OPENSHIFT_TOKEN) --server=$(OPENSHIFT_SERVER) --insecure-skip-tls-verify=true
-              oc project testing-account-dev
-              
-              echo "=== Obteniendo URL de la Aplicación ==="
-              APP_ROUTE=$(oc get route jee-msa-web-demo-pipeline -o jsonpath='{.spec.host}')
-              echo "La URL detectada es: http://$APP_ROUTE"
-              echo "##vso[task.setvariable variable=ROUTE_URL]http://$APP_ROUTE"
-            displayName: 'Obtener URL de OpenShift'
-
-          # 3. Esperar al Pod de OpenShift y realizar la petición HTTP
-          - script: |
-              # Obligamos a usar el Token/Sesión actual de oc
-              echo "=== 1. Esperando de manera inteligente a que el Pod de Java pase a 1/1 ==="
-              # El pipeline se quedará aquí esperando hasta que Spring Boot levante por completo
-              oc rollout status deployment/jee-msa-web-demo-pipeline --timeout=90s
-              
-              echo "=== 2. Enviando petición HTTP al endpoint real ==="
-              HEALTH_ENDPOINT="$(ROUTE_URL)/api/status"
-              echo "Enviando petición de prueba a: $HEALTH_ENDPOINT"
-              
-              STATUS_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$HEALTH_ENDPOINT")
-              echo "Código de respuesta HTTP obtenido: $STATUS_CODE"
-              
-              if [ "$STATUS_CODE" -ne 200 ]; then
-                echo "Error: La aplicación respondió con un código $STATUS_CODE en lugar de 200 OK"
+              if [[ -z "$OPENSHIFT_TOKEN" || "$OPENSHIFT_TOKEN" == '$('* ||
+                    -z "$OPENSHIFT_SERVER" || "$OPENSHIFT_SERVER" == '$('* ]]; then
+                echo "Error: configura OPENSHIFT_TOKEN y OPENSHIFT_SERVER en Azure Pipelines."
                 exit 1
               fi
-              echo "¡Validación exitosa! La aplicación está respondiendo correctamente."
-            displayName: 'Validar Código HTTP 200 OK'
+              oc login --token="$OPENSHIFT_TOKEN" --server="$OPENSHIFT_SERVER" --insecure-skip-tls-verify=true
+              oc project testing-account-dev
+
+              echo "=== Esperando el despliegue ==="
+              oc rollout status deployment/jee-msa-web-demo-pipeline --timeout=180s
+
+              echo "=== Obteniendo la Route ==="
+              APP_ROUTE="$(oc get route jee-msa-web-demo-pipeline -o jsonpath='{.spec.host}')"
+              if [[ -z "$APP_ROUTE" ]]; then
+                echo "Error: la Route no tiene un host asignado."
+                exit 1
+              fi
+              HEALTH_ENDPOINT="http://$APP_ROUTE/api/status"
+              echo "Comprobando: $HEALTH_ENDPOINT"
+
+              deadline=$((SECONDS + 300))
+              attempt=0
+              while (( SECONDS < deadline )); do
+                attempt=$((attempt + 1))
+                remaining=$((deadline - SECONDS))
+                request_timeout=$((remaining < 15 ? remaining : 15))
+                if STATUS_CODE="$(curl --silent --show-error --output /dev/null \
+                    --write-out '%{http_code}' --connect-timeout 5 --max-time "$request_timeout" "$HEALTH_ENDPOINT")"; then
+                  echo "Intento $attempt: HTTP $STATUS_CODE"
+                  if [[ "$STATUS_CODE" == 200 ]]; then
+                    echo "Validación exitosa: la aplicación responde HTTP 200."
+                    exit 0
+                  fi
+                else
+                  echo "Intento $attempt: no se pudo consultar el endpoint."
+                fi
+                remaining=$((deadline - SECONDS))
+                if (( remaining > 0 )); then
+                  sleep "$((remaining < 5 ? remaining : 5))"
+                fi
+              done
+              echo "Error: el endpoint no respondió HTTP 200 dentro de 5 minutos."
+              exit 1
+            displayName: 'Verificar despliegue y endpoint HTTP'
+            env:
+              OPENSHIFT_TOKEN: $(OPENSHIFT_TOKEN)
+              OPENSHIFT_SERVER: $(OPENSHIFT_SERVER)
 
   # ==========================================
   # STAGE 4: NOTIFICACIONES (NOTIFICATIONS)
   # ==========================================
   - stage: Notifications
     displayName: 'Notificar'
-    dependsOn: [CI, Approval, CD]
+    dependsOn: [CI, Approval, CD, SmokeTests]
     condition: always()
     jobs:
       - job: send_status_email
