@@ -123,7 +123,7 @@ stages:
               oc login --token=$(OPENSHIFT_TOKEN) --server=$(OPENSHIFT_SERVER) --insecure-skip-tls-verify=true
 
               echo "=== 3. Seleccionando Proyecto ==="
-              oc project testing-account-dev
+              oc project joelepam-dev
 
               echo "=== 4. Aplicando Manifiestos (Creando BuildConfig y Deployment) ==="
               oc apply -f helm/build-config.yaml
@@ -176,7 +176,7 @@ stages:
                 exit 1
               fi
               oc login --token="$OPENSHIFT_TOKEN" --server="$OPENSHIFT_SERVER" --insecure-skip-tls-verify=true
-              oc project testing-account-dev
+              oc project joelepam-dev
 
               echo "=== Esperando el despliegue ==="
               oc rollout status deployment/jee-msa-web-demo-pipeline --timeout=180s
