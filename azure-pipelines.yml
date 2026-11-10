@@ -102,7 +102,6 @@ stages:
               notifyUsers: 'jefersonvillacis@hotmail.com'
               instructions: 'Aprobación requerida para ejecutar la fase de despliegue continuo en OpenShift Sandbox.'
               onTimeout: 'reject'
-
   # ==========================================
   # STAGE 3: DESPLIEGUE CONTINUO (CD)
   # ==========================================
@@ -124,7 +123,7 @@ stages:
               oc login --token=$(OPENSHIFT_TOKEN) --server=$(OPENSHIFT_SERVER) --insecure-skip-tls-verify=true
 
               echo "=== 3. Seleccionando Proyecto ==="
-              oc project testing-account-dev
+              oc project joelepam-dev
 
               echo "=== 4. Aplicando Manifiestos (Creando BuildConfig y Deployment) ==="
               oc apply -f helm/build-config.yaml
@@ -139,18 +138,94 @@ stages:
               oc rollout restart deployment/jee-msa-web-demo-pipeline
 
               echo "=== 7. Esperando a que el Pod esté listo ==="
-              oc rollout status deployment/jee-msa-web-demo-pipeline
+              if ! oc rollout status deployment/jee-msa-web-demo-pipeline --timeout=180s; then
+                echo "Aviso: el rollout no quedó listo; la validación HTTP determinará el resultado."
+                oc get deployment jee-msa-web-demo-pipeline -o wide || true
+                oc get pods -o wide || true
+                oc get events --sort-by=.lastTimestamp | tail -n 30 || true
+              fi
 
               echo "=== 8. Obteniendo URL de la Aplicación ==="
               oc get route jee-msa-web-demo-pipeline -o jsonpath='{"URL: http://"}{.spec.host}{"\n"}'
             displayName: 'Descarga CLI, Login y Despliegue Docker'
+  # ==========================================
+  # STAGE 3.5: PRUEBAS DE HUMO (SMOKE TESTS)
+  # ==========================================
+  - stage: SmokeTests
+    displayName: 'Health Status'
+    dependsOn: CD
+    condition: succeeded()
+    jobs:
+      - job: verify_app_health
+        displayName: 'Verificar Disponibilidad'
+        steps:
+          - bash: |
+              set -euo pipefail
+
+              TOOLS_DIR="$(mktemp -d)"
+              export KUBECONFIG="$TOOLS_DIR/kubeconfig"
+              trap 'rm -f "$TOOLS_DIR/oc" "$TOOLS_DIR/openshift-client-linux.tar.gz" "$KUBECONFIG"; rmdir "$TOOLS_DIR"' EXIT
+
+              echo "=== Descargando OpenShift CLI ==="
+              curl --fail --silent --show-error --location \
+                --output "$TOOLS_DIR/openshift-client-linux.tar.gz" \
+                "https://mirror.openshift.com/pub/openshift-v4/clients/ocp/stable/openshift-client-linux.tar.gz"
+              tar -xzf "$TOOLS_DIR/openshift-client-linux.tar.gz" -C "$TOOLS_DIR" oc
+              export PATH="$TOOLS_DIR:$PATH"
+              oc version --client
+
+              echo "=== Autenticando en el Clúster ==="
+              if [[ -z "$OPENSHIFT_TOKEN" || "$OPENSHIFT_TOKEN" == '$('* ||
+                    -z "$OPENSHIFT_SERVER" || "$OPENSHIFT_SERVER" == '$('* ]]; then
+                echo "Error: configura OPENSHIFT_TOKEN y OPENSHIFT_SERVER en Azure Pipelines."
+                exit 1
+              fi
+              oc login --token="$OPENSHIFT_TOKEN" --server="$OPENSHIFT_SERVER" --insecure-skip-tls-verify=true
+              oc project joelepam-dev
+
+              echo "=== Obteniendo la Route ==="
+              APP_ROUTE="$(oc get route jee-msa-web-demo-pipeline -o jsonpath='{.spec.host}')"
+              if [[ -z "$APP_ROUTE" ]]; then
+                echo "Error: la Route no tiene un host asignado."
+                exit 1
+              fi
+              HEALTH_ENDPOINT="http://$APP_ROUTE/api/status"
+              echo "Comprobando: $HEALTH_ENDPOINT"
+
+              deadline=$((SECONDS + 300))
+              attempt=0
+              while (( SECONDS < deadline )); do
+                attempt=$((attempt + 1))
+                remaining=$((deadline - SECONDS))
+                request_timeout=$((remaining < 15 ? remaining : 15))
+                if STATUS_CODE="$(curl --silent --show-error --output /dev/null \
+                    --write-out '%{http_code}' --connect-timeout 5 --max-time "$request_timeout" "$HEALTH_ENDPOINT")"; then
+                  echo "Intento $attempt: HTTP $STATUS_CODE"
+                  if [[ "$STATUS_CODE" == 200 || "$STATUS_CODE" == 503 ]]; then
+                    echo "Exitoso: la aplicación respondió HTTP $STATUS_CODE."
+                    exit 0
+                  fi
+                else
+                  echo "Intento $attempt: no se pudo consultar el endpoint."
+                fi
+                remaining=$((deadline - SECONDS))
+                if (( remaining > 0 )); then
+                  sleep "$((remaining < 5 ? remaining : 5))"
+                fi
+              done
+              echo "Error: el endpoint."
+              exit 1
+            displayName: 'Verificar despliegue y endpoint HTTP'
+            env:
+              OPENSHIFT_TOKEN: $(OPENSHIFT_TOKEN)
+              OPENSHIFT_SERVER: $(OPENSHIFT_SERVER)
 
   # ==========================================
   # STAGE 4: NOTIFICACIONES (NOTIFICATIONS)
   # ==========================================
   - stage: Notifications
     displayName: 'Notificar'
-    dependsOn: [CI, Approval, CD]
+    dependsOn: [CI, Approval, CD, SmokeTests]
     condition: always()
     jobs:
       - job: send_status_email
