@@ -201,7 +201,7 @@ stages:
                 if STATUS_CODE="$(curl --silent --show-error --output /dev/null \
                     --write-out '%{http_code}' --connect-timeout 5 --max-time "$request_timeout" "$HEALTH_ENDPOINT")"; then
                   echo "Intento $attempt: HTTP $STATUS_CODE"
-                  if [[ "$STATUS_CODE" == 200 || "$STATUS_CODE" == 500 ]]; then
+                  if [[ "$STATUS_CODE" == 200 || "$STATUS_CODE" == 503 ]]; then
                     echo "Exitoso: la aplicación respondió HTTP $STATUS_CODE."
                     exit 0
                   fi
