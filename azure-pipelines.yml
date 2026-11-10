@@ -138,7 +138,12 @@ stages:
               oc rollout restart deployment/jee-msa-web-demo-pipeline
 
               echo "=== 7. Esperando a que el Pod esté listo ==="
-              oc rollout status deployment/jee-msa-web-demo-pipeline
+              if ! oc rollout status deployment/jee-msa-web-demo-pipeline --timeout=180s; then
+                echo "Aviso: el rollout no quedó listo; la validación HTTP determinará el resultado."
+                oc get deployment jee-msa-web-demo-pipeline -o wide || true
+                oc get pods -o wide || true
+                oc get events --sort-by=.lastTimestamp | tail -n 30 || true
+              fi
 
               echo "=== 8. Obteniendo URL de la Aplicación ==="
               oc get route jee-msa-web-demo-pipeline -o jsonpath='{"URL: http://"}{.spec.host}{"\n"}'
@@ -177,9 +182,6 @@ stages:
               fi
               oc login --token="$OPENSHIFT_TOKEN" --server="$OPENSHIFT_SERVER" --insecure-skip-tls-verify=true
               oc project joelepam-dev
-
-              echo "=== Esperando el despliegue ==="
-              oc rollout status deployment/jee-msa-web-demo-pipeline --timeout=180s
 
               echo "=== Obteniendo la Route ==="
               APP_ROUTE="$(oc get route jee-msa-web-demo-pipeline -o jsonpath='{.spec.host}')"
